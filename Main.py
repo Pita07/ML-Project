@@ -1,8 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
-from sklearn.metrics import auc, roc_curve
-
+from sklearn.metrics import auc, roc_curve,  accuracy_score, f1_score
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+import numpy as np
 
 # --- Get data from the CSV file ---
 original_data = pd.read_csv("diabetes_risk.csv")
@@ -126,3 +127,49 @@ comparison = pd.DataFrame({
     'ROC AUC': roc_results,
 }).sort_values('Kruskal-Wallis H', ascending=False)
 print(comparison)
+
+# --- Data Preparation for Dimensionality Reduction ---
+# Select numerical features for each set
+X_train = data[numerical_features].copy()
+X_validation = validation_data[numerical_features].copy()
+X_test = test_data[numerical_features].copy()
+
+y_train = data[class_column]
+y_validation = validation_data[class_column]
+y_test = test_data[class_column]
+
+# Replace missing values using training medians
+training_medians = X_train.median()
+
+X_train = X_train.fillna(training_medians)
+X_validation = X_validation.fillna(training_medians)
+X_test = X_test.fillna(training_medians)
+
+# Calculate standardization parameters on the training set
+training_means = X_train.mean()
+training_std = X_train.std(ddof=0).replace(0, 1)
+
+# Standardize each set using the same parameters
+X_train_processed = (
+    (X_train - training_means) / training_std
+).to_numpy()
+
+X_validation_processed = (
+    (X_validation - training_means) / training_std
+).to_numpy()
+
+X_test_processed = (
+    (X_test - training_means) / training_std
+).to_numpy()
+
+
+# --- PCA ---
+# Center the training data
+pca_mean = X_train_processed.mean(axis=0)
+X_train_centered = X_train_processed - pca_mean
+
+# Calculate the covariance matrix
+covariance_matrix = np.cov(
+    X_train_centered,
+    rowvar=False,
+)
