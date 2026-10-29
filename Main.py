@@ -2,19 +2,29 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from sklearn.metrics import auc, roc_curve
+from sklearn.model_selection import train_test_split
 
 
 # --- Get data from the CSV file ---
 original_data = pd.read_csv("diabetes_risk.csv")
 
-# Separate data in train, validation and test sets
-separation_values = [0.7, 0.15, 0.15]  # Train, Validation, Test
-data = original_data.sample(frac=separation_values[0], random_state=42)
-validation_data = original_data.sample(frac=separation_values[1], random_state=42, replace=False)
-test_data = original_data.sample(frac=separation_values[2], random_state=42, replace=False)
+# Separate data into non-overlapping train, validation and test sets.
+class_column = original_data.columns[-1]
+train_data, remaining_data = train_test_split(
+    original_data,
+    test_size=0.3,
+    random_state=42,
+    stratify=original_data[class_column],
+)
+validation_data, test_data = train_test_split(
+    remaining_data,
+    test_size=0.5,
+    random_state=42,
+    stratify=remaining_data[class_column],
+)
+data = train_data
 
 # Seperate by classes
-class_column = data.columns[-1]
 classes = sorted(data[class_column].unique())
 
 # Select numerical and categorical features
