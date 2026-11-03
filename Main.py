@@ -294,3 +294,50 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.show()
 
+# --- LDA ---
+# Select at most one component less than the number of classes
+n_components_lda = min(
+    len(classes) - 1,
+    X_train_processed.shape[1],
+)
+
+lda = LinearDiscriminantAnalysis(
+    n_components=n_components_lda,
+)
+
+# Learn the discriminant directions using the training labels
+X_train_lda = lda.fit_transform(
+    X_train_processed,
+    y_train,
+)
+
+# Apply the same transformation to validation and test sets
+X_validation_lda = lda.transform(X_validation_processed)
+X_test_lda = lda.transform(X_test_processed)
+
+print("\nLDA results:")
+print(f"Original features: {X_train_processed.shape[1]}")
+print(f"Selected components: {X_train_lda.shape[1]}")
+print(f"Explained discriminant ratio: {lda.explained_variance_ratio_}")
+
+# Plot the two discriminant components
+plt.figure(figsize=(8, 6))
+
+for class_value in classes:
+    class_rows = (y_train == class_value).to_numpy()
+
+    plt.scatter(
+        X_train_lda[class_rows, 0],
+        X_train_lda[class_rows, 1],
+        label=class_value,
+        alpha=0.3,
+        s=10,
+    )
+
+plt.xlabel('LD1')
+plt.ylabel('LD2')
+plt.title('LDA projection of the training data')
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
