@@ -129,21 +129,73 @@ comparison = pd.DataFrame({
 print(comparison)
 
 # --- Data Preparation for Dimensionality Reduction ---
-# Select numerical features for each set
-X_train = data[numerical_features].copy()
-X_validation = validation_data[numerical_features].copy()
-X_test = test_data[numerical_features].copy()
+# Select categorical features, excluding the ID and target
+categorical_columns = data.select_dtypes(
+    include=['object', 'string', 'category']
+).columns
+
+categorical_features = categorical_columns.drop(
+    [data.columns[0], class_column],
+    errors='ignore',
+)
+
+# Select numerical and categorical features
+selected_features = (
+    list(numerical_features) + list(categorical_features)
+)
+
+X_train = data[selected_features].copy()
+X_validation = validation_data[selected_features].copy()
+X_test = test_data[selected_features].copy()
 
 y_train = data[class_column]
 y_validation = validation_data[class_column]
 y_test = test_data[class_column]
 
-# Replace missing values using training medians
-training_medians = X_train.median()
+# Replace missing numerical values using training medians
+training_medians = X_train[numerical_features].median()
 
-X_train = X_train.fillna(training_medians)
-X_validation = X_validation.fillna(training_medians)
-X_test = X_test.fillna(training_medians)
+for dataset in [X_train, X_validation, X_test]:
+    dataset[numerical_features] = (
+        dataset[numerical_features].fillna(training_medians)
+    )
+
+# Represent missing categorical values as a separate category
+for feature in categorical_features:
+    for dataset in [X_train, X_validation, X_test]:
+        dataset[feature] = (
+            dataset[feature].astype('string').fillna('Missing')
+        )
+
+# Convert categorical features into numerical columns
+X_train = pd.get_dummies(
+    X_train,
+    columns=list(categorical_features),
+    dtype=float,
+)
+
+X_validation = pd.get_dummies(
+    X_validation,
+    columns=list(categorical_features),
+    dtype=float,
+)
+
+X_test = pd.get_dummies(
+    X_test,
+    columns=list(categorical_features),
+    dtype=float,
+)
+
+# Keep the same columns and column order as the training set
+X_validation = X_validation.reindex(
+    columns=X_train.columns,
+    fill_value=0,
+)
+
+X_test = X_test.reindex(
+    columns=X_train.columns,
+    fill_value=0,
+)
 
 # Calculate standardization parameters on the training set
 training_means = X_train.mean()
@@ -162,6 +214,8 @@ X_test_processed = (
     (X_test - training_means) / training_std
 ).to_numpy()
 
+print("\nData preparation:")
+print(f"Number of encoded features: {X_train_processed.shape[1]}")
 
 # --- PCA ---
 # Center the training data
@@ -173,3 +227,70 @@ covariance_matrix = np.cov(
     X_train_centered,
     rowvar=False,
 )
+
+# Calculate eigenvalues and eigenvectors
+eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+
+# Order the components by decreasing variance
+sorted_indices = np.argsort(eigenvalues)[::-1]
+
+eigenvalues = eigenvalues[sorted_indices]
+eigenvectors = eigenvectors[:, sorted_indices]
+
+# Remove small negative values caused by numerical rounding
+eigenvalues = np.maximum(eigenvalues, 0)
+
+# Calculate the variance explained by each component
+explained_variance_ratio = eigenvalues / eigenvalues.sum()
+cumulative_variance = np.cumsum(explained_variance_ratio)
+
+# Select enough components to retain at least 95% of the variance
+n_components_pca = int(
+    np.searchsorted(cumulative_variance, 0.95) + 1
+)
+
+pca_components = eigenvectors[:, :n_components_pca]
+
+# Project all sets using the training mean and components
+X_train_pca = X_train_centered @ pca_components
+
+X_validation_pca = (
+    X_validation_processed - pca_mean
+) @ pca_components
+
+X_test_pca = (
+    X_test_processed - pca_mean
+) @ pca_components
+
+print("\nPCA results:")
+print(f"Original features: {X_train_processed.shape[1]}")
+print(f"Selected components: {n_components_pca}")
+print(
+    f"Explained variance: "
+    f"{cumulative_variance[n_components_pca - 1]:.4f}"
+)
+
+# Plot the cumulative explained variance
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    range(1, len(cumulative_variance) + 1),
+    cumulative_variance,
+    marker='o',
+)
+
+plt.axhline(
+    y=0.95,
+    color='red',
+    linestyle='--',
+    label='95% explained variance',
+)
+
+plt.xlabel('Number of components')
+plt.ylabel('Cumulative explained variance')
+plt.title('PCA explained variance')
+plt.legend()
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
