@@ -1,28 +1,75 @@
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from sklearn.metrics import auc, roc_curve,  accuracy_score, f1_score
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-import numpy as np
+from sklearn.model_selection import train_test_split
 
 # --- Get data from the CSV file ---
 original_data = pd.read_csv("diabetes_risk.csv")
 
 # Separate data in train, validation and test sets
 separation_values = [0.7, 0.15, 0.15]  # Train, Validation, Test
-data = original_data.sample(frac=separation_values[0], random_state=42)
-validation_data = original_data.sample(frac=separation_values[1], random_state=42, replace=False)
-test_data = original_data.sample(frac=separation_values[2], random_state=42, replace=False)
+class_column = original_data.columns[-1]
+
+data, remaining_data = train_test_split(
+    original_data,
+    train_size=separation_values[0],
+    stratify=original_data[class_column],
+    random_state=42,
+)
+validation_data, test_data = train_test_split(
+    remaining_data,
+    test_size=separation_values[2] / (separation_values[1] + separation_values[2]),
+    stratify=remaining_data[class_column],
+    random_state=42,
+)
 
 # Seperate by classes
-class_column = data.columns[-1]
 classes = sorted(data[class_column].unique())
 
 # Select numerical and categorical features
 numerical_columns = data.select_dtypes(include='number').columns
 numerical_features = numerical_columns[~numerical_columns.isin([data.columns[0], class_column])]  # Exclude the ID and class columns
-categorical_columns = data.select_dtypes(include='object').columns
+categorical_columns = data.select_dtypes(include=['object', 'string', 'category']).columns
 categorical_features = categorical_columns[~categorical_columns.isin([data.columns[0], class_column])]  # Exclude the ID and class columns
+
+
+# --- Missing Values and Categorical Encoding ---
+# Categorical features should be ranked too
+raw_features = (list(numerical_features) + list(categorical_features))
+
+X_train = data[raw_features].copy()
+X_validation = validation_data[raw_features].copy()
+X_test = test_data[raw_features].copy()
+
+y_train = data[class_column]
+y_validation = validation_data[class_column]
+y_test = test_data[class_column]
+
+# Represent missing categorical values as a separate category.
+# The categories seen in training are used for every set, so that
+# drop_first removes the same dummy column everywhere
+for feature in categorical_features:
+    train_categories = sorted(
+        X_train[feature].astype('string').fillna('Missing').unique()
+    )
+    for dataset in [X_train, X_validation, X_test]:
+        dataset[feature] = pd.Categorical(
+            dataset[feature].astype('string').fillna('Missing'),
+            categories=train_categories,
+        )
+
+# Convert categorical features into numerical columns
+# (drop_first avoids perfectly collinear dummy columns)
+X_train = pd.get_dummies(X_train, columns=list(categorical_features), dtype=float, drop_first=True)
+X_validation = pd.get_dummies(X_validation, columns=list(categorical_features), dtype=float, drop_first=True)
+X_test = pd.get_dummies(X_test, columns=list(categorical_features), dtype=float, drop_first=True)
+
+# Keep the same columns and column order as the training set
+X_validation = X_validation.reindex(columns=X_train.columns, fill_value=0,)
+X_test = X_test.reindex(columns=X_train.columns, fill_value=0,)
 
 
 # --- Feature Selection and Reduction ---
@@ -53,7 +100,11 @@ def kruskal_wallis_test(feature):
     
     overall_rank_mean = (N + 1) / 2
     H = (12 / (N * (N + 1))) * sum(n * (rank_mean - overall_rank_mean) ** 2 for n, rank_mean in zip(n_values, rank_means))
-    return H
+
+    # Tie correction (needed for discrete and binary features)
+    tie_counts = all_values.value_counts().to_numpy().astype(float)
+    tie_correction = 1 - (tie_counts ** 3 - tie_counts).sum() / (N ** 3 - N)
+    return H / tie_correction if tie_correction > 0 else 0.0   
 
 h_statistics = {feature: kruskal_wallis_test(feature) for feature in numerical_features}
 sorted_features = sorted(h_statistics.items(), key=lambda x: x[1], reverse=True)
@@ -70,6 +121,7 @@ correlation_matrix = data[top_features].corr()
 plt.figure(figsize=(10, 8))
 plt.imshow(correlation_matrix, cmap='coolwarm', interpolation='nearest')
 plt.colorbar()
+plt.xticks(range(len(top_features)), top_features, rotation=45, ha='right')
 plt.yticks(range(len(top_features)), top_features)
 
 for row in range(correlation_matrix.shape[0]):
@@ -84,32 +136,46 @@ for row in range(correlation_matrix.shape[0]):
         )
 
 plt.title('Correlation Matrix')
+plt.tight_layout()
 plt.show()
+
+# Highly correlated pairs among all features (redundancy check)
+full_correlation = X_train.corr().abs()
+for i, first in enumerate(full_correlation.columns):
+    for second in full_correlation.columns[i + 1:]:
+        if full_correlation.loc[first, second] > 0.8:
+            print(f"High correlation: {first} / {second} = {full_correlation.loc[first, second]:.4f}")
 
 # ROC Curve and AUC
 roc_targets = (data[class_column] == "High").astype(int).to_numpy()
 
 roc_results = {}
-plt.figure(figsize=(10, 7))
-
-for feature in numerical_features:
+roc_curves = {}
+for feature in X_train.columns:
     false_positive_rate, true_positive_rate, _ = roc_curve(
-        roc_targets,
-        data[feature].to_numpy(),
+        roc_targets, X_train[feature].to_numpy()
     )
-    feature_auc = auc(false_positive_rate, true_positive_rate)
-    roc_results[feature] = feature_auc
+    roc_results[feature] = auc(false_positive_rate, true_positive_rate)
+    roc_curves[feature] = (false_positive_rate, true_positive_rate)
+
+plt.figure(figsize=(10, 7))
+top_roc = sorted(
+    roc_results,
+    key=lambda f: max(roc_results[f], 1 - roc_results[f]), # Use the strength of the AUC, not the direction 
+    reverse=True,
+)[:10]  # Display the top 10 features
+
+for feature in top_roc:
     plt.plot(
-        false_positive_rate,
-        true_positive_rate,
+        *roc_curves[feature],
         linewidth=2,
-        label=f'{feature} (AUC = {feature_auc:.4f})',
+        label=f'{feature} (AUC = {roc_results[feature]:.4f})',
     )
 
 plt.plot([0, 1], [0, 1], 'k--', label='Random classifier (AUC = 0.5000)')
 plt.xlabel('False positive rate')
 plt.ylabel('True positive rate')
-plt.title('ROC curves: Super versus Average')
+plt.title('ROC curves: High versus the other classes')
 plt.legend(loc='lower right')
 plt.grid(alpha=0.3)
 plt.tight_layout()
@@ -121,82 +187,24 @@ for feature, feature_auc in sorted_auc:
     print(f"{feature}: AUC = {feature_auc:.4f}")'''
 
 # Compare Kruskal-Wallis H and ROC AUC
+# (AUC strength = max(AUC, 1 - AUC), since AUC < 0.5 means a negative relation)
 print("\nComparison of Kruskal-Wallis H and ROC AUC:")
 comparison = pd.DataFrame({
     'Kruskal-Wallis H': h_statistics,
-    'ROC AUC': roc_results,
-}).sort_values('Kruskal-Wallis H', ascending=False)
+    'AUC strength': {feature: max(a, 1 - a) for feature, a in roc_results.items()}, # We want the strength of the AUC, not the direction
+}).sort_values(['Kruskal-Wallis H', 'AUC strength'], ascending=[False, False])
 print(comparison)
 
+'''# Keep only the top features by H statistic (None keeps all of them)
+N_SELECTED = None
+selected_features = [feature for feature, _ in sorted_features[:N_SELECTED]]
+
+X_train = X_train[selected_features]
+X_validation = X_validation[selected_features]
+X_test = X_test[selected_features]'''
+
+
 # --- Data Preparation for Dimensionality Reduction ---
-# Select categorical features, excluding the ID and target
-categorical_columns = data.select_dtypes(
-    include=['object', 'string', 'category']
-).columns
-
-categorical_features = categorical_columns.drop(
-    [data.columns[0], class_column],
-    errors='ignore',
-)
-
-# Select numerical and categorical features
-selected_features = (
-    list(numerical_features) + list(categorical_features)
-)
-
-X_train = data[selected_features].copy()
-X_validation = validation_data[selected_features].copy()
-X_test = test_data[selected_features].copy()
-
-y_train = data[class_column]
-y_validation = validation_data[class_column]
-y_test = test_data[class_column]
-
-# Replace missing numerical values using training medians
-training_medians = X_train[numerical_features].median()
-
-for dataset in [X_train, X_validation, X_test]:
-    dataset[numerical_features] = (
-        dataset[numerical_features].fillna(training_medians)
-    )
-
-# Represent missing categorical values as a separate category
-for feature in categorical_features:
-    for dataset in [X_train, X_validation, X_test]:
-        dataset[feature] = (
-            dataset[feature].astype('string').fillna('Missing')
-        )
-
-# Convert categorical features into numerical columns
-X_train = pd.get_dummies(
-    X_train,
-    columns=list(categorical_features),
-    dtype=float,
-)
-
-X_validation = pd.get_dummies(
-    X_validation,
-    columns=list(categorical_features),
-    dtype=float,
-)
-
-X_test = pd.get_dummies(
-    X_test,
-    columns=list(categorical_features),
-    dtype=float,
-)
-
-# Keep the same columns and column order as the training set
-X_validation = X_validation.reindex(
-    columns=X_train.columns,
-    fill_value=0,
-)
-
-X_test = X_test.reindex(
-    columns=X_train.columns,
-    fill_value=0,
-)
-
 # Calculate standardization parameters on the training set
 training_means = X_train.mean()
 training_std = X_train.std(ddof=0).replace(0, 1)
@@ -217,7 +225,9 @@ X_test_processed = (
 print("\nData preparation:")
 print(f"Number of encoded features: {X_train_processed.shape[1]}")
 
-# --- PCA ---
+
+# --- Dimensionality Reduction ---
+# PCA
 # Center the training data
 pca_mean = X_train_processed.mean(axis=0)
 X_train_centered = X_train_processed - pca_mean
@@ -294,7 +304,7 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# --- LDA ---
+# LDA
 # Select at most one component less than the number of classes
 n_components_lda = min(
     len(classes) - 1,
