@@ -7,6 +7,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
 
 
 # =============================================================================
@@ -489,6 +490,18 @@ def choose_k(X_tr, y_tr, X_val, y_val):
     return best_k, validation_accuracy
 
 
+# --- SVM Classifier ---
+# Linear kernel: linear decision boundaries
+# RBF kernel: non-linear decision boundaries
+
+def svm_fit(X, y, kernel):
+    return SVC(
+        kernel=kernel,
+        C=1.0,
+        gamma='scale',
+    ).fit(X, y)
+
+
 # --- Run the classifiers ---
 # Validation is used to compare pipelines; the test set is left untouched for the final assessment.
 feature_sets = {
@@ -515,8 +528,31 @@ for set_name, (X_tr, X_val) in feature_sets.items():
     knn_model = knn_fit(X_tr, y_train_array, best_k)
     y_pred_knn = class_labels[np.argmax(knn_scores(X_val, knn_model), axis=1)]
 
+    # Linear SVM
+    svm_linear_model = svm_fit(
+        X_tr,
+        y_train_array,
+        kernel='linear',
+    )
+
+    y_pred_svm_linear = svm_linear_model.predict(X_val)
+
+    # Non-linear SVM
+    svm_rbf_model = svm_fit(
+        X_tr,
+        y_train_array,
+        kernel='rbf',
+    )
+
+    y_pred_svm_rbf = svm_rbf_model.predict(X_val)
+
     # Temporary print before doing 3.5
-    print(f"{set_name}: validation accuracy | Minimum Distance = {np.mean(y_pred_md == y_validation_array):.4f}"
-          f" | Fisher LDA = {np.mean(y_pred_f == y_validation_array):.4f}"
-          f" | Bayes = {np.mean(y_pred_bayes == y_validation_array):.4f}"
-          f" | kNN (k={best_k}) = {np.mean(y_pred_knn == y_validation_array):.4f}")
+    print(
+        f"{set_name}: validation accuracy"
+        f" | Minimum Distance = {np.mean(y_pred_md == y_validation_array):.4f}"
+        f" | Fisher LDA = {np.mean(y_pred_f == y_validation_array):.4f}"
+        f" | Bayes = {np.mean(y_pred_bayes == y_validation_array):.4f}"
+        f" | kNN (k={best_k}) = {np.mean(y_pred_knn == y_validation_array):.4f}"
+        f" | Linear SVM = {np.mean(y_pred_svm_linear == y_validation_array):.4f}"
+        f" | RBF SVM = {np.mean(y_pred_svm_rbf == y_validation_array):.4f}"
+    )
