@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 
 
 # =============================================================================
@@ -502,6 +504,32 @@ def svm_fit(X, y, kernel):
     ).fit(X, y)
 
 
+# --- Decision Tree Classifier ---
+
+def decision_tree_fit(X, y):
+    return DecisionTreeClassifier(
+        random_state=42,
+    ).fit(X, y)
+
+
+# --- Random Forest Classifier ---
+
+def random_forest_fit(X, y):
+    return RandomForestClassifier(
+        n_estimators=100,
+        random_state=42,
+    ).fit(X, y)
+
+
+# --- AdaBoost Classifier ---
+
+def adaboost_fit(X, y):
+    return AdaBoostClassifier(
+        n_estimators=50,
+        random_state=42,
+    ).fit(X, y)
+
+
 # --- Run the classifiers ---
 # Validation is used to compare pipelines; the test set is left untouched for the final assessment.
 feature_sets = {
@@ -546,6 +574,18 @@ for set_name, (X_tr, X_val) in feature_sets.items():
 
     y_pred_svm_rbf = svm_rbf_model.predict(X_val)
 
+    # Decision Tree
+    decision_tree_model = decision_tree_fit(X_tr, y_train_array)
+    y_pred_tree = decision_tree_model.predict(X_val)
+
+    # Random Forest
+    random_forest_model = random_forest_fit(X_tr, y_train_array)
+    y_pred_forest = random_forest_model.predict(X_val)
+
+    # AdaBoost
+    adaboost_model = adaboost_fit(X_tr, y_train_array)
+    y_pred_adaboost = adaboost_model.predict(X_val)
+
     # Temporary print before doing 3.5
     print(
         f"{set_name}: validation accuracy"
@@ -555,4 +595,7 @@ for set_name, (X_tr, X_val) in feature_sets.items():
         f" | kNN (k={best_k}) = {np.mean(y_pred_knn == y_validation_array):.4f}"
         f" | Linear SVM = {np.mean(y_pred_svm_linear == y_validation_array):.4f}"
         f" | RBF SVM = {np.mean(y_pred_svm_rbf == y_validation_array):.4f}"
+        f" | Decision Tree = {np.mean(y_pred_tree == y_validation_array):.4f}"
+        f" | Random Forest = {np.mean(y_pred_forest == y_validation_array):.4f}"
+        f" | AdaBoost = {np.mean(y_pred_adaboost == y_validation_array):.4f}"
     )
